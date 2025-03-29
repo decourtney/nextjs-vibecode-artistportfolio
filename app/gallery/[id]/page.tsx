@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 interface Artwork {
   _id: string;
@@ -85,6 +85,27 @@ export default function ArtworkPage() {
     }
   }, [artwork, allArtworks, router, category, medium, size]);
 
+  const navigateToArtwork = useCallback(
+    (direction: "prev" | "next") => {
+      const currentIndex = allArtworks.findIndex((a) => a._id === artwork?._id);
+      let newIndex: number;
+
+      if (direction === "prev") {
+        newIndex = currentIndex > 0 ? currentIndex - 1 : allArtworks.length - 1;
+      } else {
+        newIndex = currentIndex < allArtworks.length - 1 ? currentIndex + 1 : 0;
+      }
+
+      const nextArtwork = allArtworks[newIndex];
+      if (nextArtwork) {
+        router.push(
+          `/gallery/${nextArtwork._id}?category=${category}&medium=${medium}&size=${size}`
+        );
+      }
+    },
+    [allArtworks, artwork, router, category, medium, size]
+  );
+
   // Add keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -97,25 +118,7 @@ export default function ArtworkPage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, allArtworks]);
-
-  const navigateToArtwork = (direction: "prev" | "next") => {
-    if (allArtworks.length === 0) return;
-
-    let newIndex;
-    if (direction === "prev") {
-      newIndex = currentIndex > 0 ? currentIndex - 1 : allArtworks.length - 1;
-    } else {
-      newIndex = currentIndex < allArtworks.length - 1 ? currentIndex + 1 : 0;
-    }
-
-    const nextArtwork = allArtworks[newIndex];
-    if (nextArtwork) {
-      router.push(
-        `/gallery/${nextArtwork._id}?category=${category}&medium=${medium}&size=${size}`
-      );
-    }
-  };
+  }, [currentIndex, allArtworks, navigateToArtwork]);
 
   if (isLoading) {
     return (

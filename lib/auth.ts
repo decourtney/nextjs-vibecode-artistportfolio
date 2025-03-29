@@ -9,9 +9,6 @@ export async function checkAdminRole() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  console.log("Session user:", session.user);
-  console.log("User role:", session.user.role);
-
   if (!session.user.role || session.user.role !== "admin") {
     return NextResponse.json(
       { error: "This function is disabled for non-admin users" },

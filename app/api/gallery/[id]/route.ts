@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/[...nextauth]/authOptions";
 import connectDB from "@/lib/mongodb";
-import mongoose from "mongoose";
-import { getSignedImageUrl, uploadToS3, s3Client } from "@/lib/s3";
-import { sanitizeFilename, createThumbnail } from "@/lib/utils";
+import { getSignedImageUrl, s3Client } from "@/lib/s3";
+import { sanitizeFilename } from "@/lib/utils";
 import { checkAdminRole } from "@/lib/auth";
 
 // Import Tag model first to ensure it's registered
@@ -15,15 +14,15 @@ import { DeleteObjectCommand, CopyObjectCommand } from "@aws-sdk/client-s3";
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await connectDB();
     const { id } = await params;
-
     const artwork = await Artwork.findById(id).populate(
       "categories medium size"
     );
+
     if (!artwork) {
       return NextResponse.json({ error: "Artwork not found" }, { status: 404 });
     }
@@ -33,7 +32,7 @@ export async function GET(
       try {
         const urlObj = new URL(url);
         return urlObj.pathname.slice(1); // Remove leading slash
-      } catch (e) {
+      } catch {
         return "";
       }
     };
@@ -67,7 +66,8 @@ export async function GET(
     };
 
     return NextResponse.json(transformedArtwork);
-  } catch (error) {
+  } catch (err) {
+    console.error("Error fetching artwork:", err);
     return NextResponse.json(
       { error: "Failed to fetch artwork" },
       { status: 500 }
@@ -77,7 +77,7 @@ export async function GET(
 
 export async function PUT(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Check for admin role
@@ -241,13 +241,10 @@ export async function PUT(
 
       return NextResponse.json(transformedArtwork);
     }
-  } catch (error) {
-    console.error("Error updating artwork:", error);
+  } catch (err) {
+    console.error("Error updating artwork:", err);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to update artwork",
-      },
+      { error: "Failed to update artwork" },
       { status: 500 }
     );
   }
@@ -255,7 +252,7 @@ export async function PUT(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Check for admin role
@@ -312,8 +309,8 @@ export async function DELETE(
     await Artwork.findByIdAndDelete(id);
 
     return NextResponse.json({ message: "Artwork deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting artwork:", error);
+  } catch (err) {
+    console.error("Error deleting artwork:", err);
     return NextResponse.json(
       { error: "Failed to delete artwork" },
       { status: 500 }

@@ -36,6 +36,7 @@ function TagForm({
       setIsSubmitting(true);
       await onAdd(tagToAdd);
     } catch (error) {
+      console.error("Error adding tag:", error);
       setValue(tagToAdd);
     } finally {
       setIsSubmitting(false);
@@ -75,23 +76,23 @@ export default function TagManager({
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
+    const loadTags = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch(`/api/tags?type=${type}`);
+        if (!response.ok) throw new Error("Failed to fetch tags");
+        const data = await response.json();
+        setTags(data);
+      } catch (error) {
+        console.error("Error loading tags:", error);
+        toast.error("Failed to load tags");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
     loadTags();
   }, [type]);
-
-  const loadTags = async () => {
-    try {
-      setIsLoading(true);
-      const response = await fetch(`/api/tags?type=${type}`);
-      if (!response.ok) throw new Error("Failed to fetch tags");
-      const data = await response.json();
-      setTags(data);
-    } catch (error) {
-      console.error("Error loading tags:", error);
-      toast.error("Failed to load tags");
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleAdd = async (label: string) => {
     const response = await fetch("/api/tags", {

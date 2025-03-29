@@ -1,18 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Artwork } from "@/types/gallery";
-import { Tag } from "@/types/tag";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import TagManager from "../components/TagManager";
-
-const ITEMS_PER_PAGE = 12;
 
 const artworkSchema = z.object({
   title: z.string().optional(),
@@ -25,23 +22,52 @@ const artworkSchema = z.object({
 
 type ArtworkFormData = z.infer<typeof artworkSchema>;
 
+interface DashboardTag {
+  _id: string;
+  label: string;
+  type: "category" | "medium" | "size";
+}
+
+interface FormData {
+  title: string;
+  description: string;
+  category: string;
+  medium: string;
+  size: string;
+  price: string;
+  image: File | null;
+}
+
+interface GalleryResponse {
+  artworks: Artwork[];
+  total: number;
+  totalPages: number;
+}
+
 export default function Dashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [artworks, setArtworks] = useState<Artwork[]>([]);
-  const [selectedArtworks, setSelectedArtworks] = useState<Set<string>>(
-    new Set()
-  );
+  const [artworks, setArtworks] = useState<GalleryResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [totalPages] = useState(1);
+  const [selectedArtworks, setSelectedArtworks] = useState<string[]>([]);
+  const [categories, setCategories] = useState<DashboardTag[]>([]);
+  const [mediums, setMediums] = useState<DashboardTag[]>([]);
+  const [sizes, setSizes] = useState<DashboardTag[]>([]);
+  const [formData, setFormData] = useState<FormData>({
+    title: "",
+    description: "",
+    category: "",
+    medium: "",
+    size: "",
+    price: "",
+    image: null,
+  });
   const [editingArtwork, setEditingArtwork] = useState<Artwork | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isBatchUpload, setIsBatchUpload] = useState(false);
-  const [categories, setCategories] = useState<Tag[]>([]);
-  const [mediums, setMediums] = useState<Tag[]>([]);
-  const [sizes, setSizes] = useState<Tag[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [totalFiles, setTotalFiles] = useState(0);
   const [processedFiles, setProcessedFiles] = useState(0);
@@ -51,13 +77,24 @@ export default function Dashboard() {
     handleSubmit,
     reset,
     formState: { errors },
-    watch,
   } = useForm<ArtworkFormData>({
     resolver: zodResolver(artworkSchema),
   });
 
-  // Watch form values for debugging
-  const formValues = watch();
+  const loadArtworks = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch("/api/gallery");
+      if (!response.ok) throw new Error("Failed to fetch artworks");
+      const data = await response.json();
+      setArtworks(data);
+    } catch (error) {
+      console.error("Error loading artworks:", error);
+      toast.error("Failed to load artworks");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -70,7 +107,7 @@ export default function Dashboard() {
       loadArtworks();
       loadTags();
     }
-  }, [session, currentPage]);
+  }, [session, currentPage, loadArtworks]);
 
   const loadTags = async () => {
     try {
@@ -96,27 +133,6 @@ export default function Dashboard() {
     } catch (error) {
       console.error("Error loading tags:", error);
       toast.error("Failed to load tags");
-    }
-  };
-
-  const loadArtworks = async () => {
-    try {
-      setIsLoading(true);
-      const response = await fetch(
-        `/api/gallery?page=${currentPage}&limit=${ITEMS_PER_PAGE}`
-      );
-      if (!response.ok) {
-        throw new Error("Failed to fetch artworks");
-      }
-      const data = await response.json();
-      setArtworks(data.artworks || []);
-      setTotalPages(Math.ceil((data.total || 0) / ITEMS_PER_PAGE));
-    } catch (error) {
-      console.error("Error loading artworks:", error);
-      toast.error("Failed to load artworks");
-      setArtworks([]);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -282,8 +298,8 @@ export default function Dashboard() {
         if (responseData.error) {
           errorMessage = responseData.error;
         }
-      } catch (e) {
-        // If we can't parse the response as JSON, use the default error message
+      } catch (error) {
+        console.error("Error deleting artwork:", error);
       }
 
       if (!response.ok) {
@@ -313,25 +329,25 @@ export default function Dashboard() {
       } else {
         newSelection.add(artworkId);
       }
-      return newSelection;
+      return Array.from(newSelection);
     });
   };
 
   const handleBatchDelete = async () => {
-    if (selectedArtworks.size === 0) {
+    if (selectedArtworks.length === 0) {
       toast.error("Please select at least one artwork to delete");
       return;
     }
 
     if (
       !confirm(
-        `Are you sure you want to delete ${selectedArtworks.size} artworks?`
+        `Are you sure you want to delete ${selectedArtworks.length} artworks?`
       )
     )
       return;
 
     try {
-      const deletePromises = Array.from(selectedArtworks).map((id) =>
+      const deletePromises = selectedArtworks.map((id) =>
         fetch(`/api/gallery/${id}`, {
           method: "DELETE",
         }).then(async (response) => {
@@ -377,7 +393,7 @@ export default function Dashboard() {
             successCount !== 1 ? "s" : ""
           }`
         );
-        setSelectedArtworks(new Set());
+        setSelectedArtworks([]);
         loadArtworks();
       }
 
@@ -528,8 +544,11 @@ export default function Dashboard() {
                   Category
                 </label>
                 <select
-                  {...register("category")}
-                  className="w-full p-2 border rounded"
+                  value={formData.category}
+                  onChange={(e) =>
+                    setFormData({ ...formData, category: e.target.value })
+                  }
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
                 >
                   <option value="">Select a category</option>
                   {categories.map((cat) => (
@@ -635,18 +654,18 @@ export default function Dashboard() {
 
         <div className="mt-8">
           {isLoading ? (
-            <div className="flex justify-center">
+            <div className="flex justify-center items-center h-64">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
             </div>
-          ) : artworks.length === 0 ? (
+          ) : !artworks?.artworks?.length ? (
             <div className="text-center text-gray-500">No artworks found</div>
           ) : (
             <>
-              {selectedArtworks.size > 0 && (
+              {selectedArtworks.length > 0 && (
                 <div className="mb-4 flex justify-between items-center">
                   <span className="text-sm text-gray-600">
-                    {selectedArtworks.size} artwork
-                    {selectedArtworks.size !== 1 ? "s" : ""} selected
+                    {selectedArtworks.length} artwork
+                    {selectedArtworks.length !== 1 ? "s" : ""} selected
                   </span>
                   <button
                     onClick={handleBatchDelete}
@@ -657,58 +676,60 @@ export default function Dashboard() {
                 </div>
               )}
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                {artworks.map((artwork, index) => (
-                  <div
-                    key={artwork._id}
-                    className="bg-white rounded-lg shadow-md overflow-hidden group"
-                  >
-                    <div className="relative aspect-square">
-                      <div className="absolute top-2 left-2 z-10">
-                        <input
-                          type="checkbox"
-                          checked={selectedArtworks.has(artwork._id)}
-                          onChange={() => toggleArtworkSelection(artwork._id)}
-                          className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                {(artworks?.artworks || []).map(
+                  (artwork: Artwork, index: number) => (
+                    <div
+                      key={artwork._id}
+                      className="bg-white rounded-lg shadow-md overflow-hidden group"
+                    >
+                      <div className="relative aspect-square">
+                        <div className="absolute top-2 left-2 z-10">
+                          <input
+                            type="checkbox"
+                            checked={selectedArtworks.includes(artwork._id)}
+                            onChange={() => toggleArtworkSelection(artwork._id)}
+                            className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                          />
+                        </div>
+                        <Image
+                          src={artwork.thumbnailUrl}
+                          alt={artwork.title}
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
+                          priority={index < 12}
                         />
-                      </div>
-                      <Image
-                        src={artwork.thumbnailUrl}
-                        alt={artwork.title}
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
-                        priority={index < 12}
-                      />
-                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center">
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-2">
-                          <button
-                            onClick={() => handleEdit(artwork)}
-                            className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDelete(artwork._id)}
-                            className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
-                          >
-                            Delete
-                          </button>
+                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center">
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-2">
+                            <button
+                              onClick={() => handleEdit(artwork)}
+                              className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDelete(artwork._id)}
+                              className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       </div>
+                      <div className="p-2">
+                        <h3 className="font-semibold text-sm mb-1 truncate">
+                          {artwork.title}
+                        </h3>
+                        <p className="text-xs text-gray-600 mb-1 truncate">
+                          {artwork.category}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {artwork.medium} • {artwork.size}
+                        </p>
+                      </div>
                     </div>
-                    <div className="p-2">
-                      <h3 className="font-semibold text-sm mb-1 truncate">
-                        {artwork.title}
-                      </h3>
-                      <p className="text-xs text-gray-600 mb-1 truncate">
-                        {artwork.category}
-                      </p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {artwork.medium} • {artwork.size}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  )
+                )}
               </div>
             </>
           )}

@@ -8,7 +8,7 @@ if (!process.env.MONGODB_URI) {
 
 const MONGODB_URI = process.env.MONGODB_URI;
 
-let cached: {
+const cached: {
   conn: typeof mongoose | null;
   promise: Promise<typeof mongoose> | null;
 } = {

@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useInView } from "react-intersection-observer";
-import { useSession } from "next-auth/react";
 
 interface Artwork {
   _id: string;
@@ -23,7 +22,6 @@ interface Artwork {
 const ITEMS_PER_PAGE = 12;
 
 export default function Gallery() {
-  const { data: session } = useSession();
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [selectedMedium, setSelectedMedium] = useState("All");
   const [selectedSize, setSelectedSize] = useState("All");
