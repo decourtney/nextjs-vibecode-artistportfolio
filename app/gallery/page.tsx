@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useInView } from "react-intersection-observer";
+import { useSession } from "next-auth/react";
 
 interface Artwork {
   _id: string;
@@ -22,6 +23,7 @@ interface Artwork {
 const ITEMS_PER_PAGE = 12;
 
 export default function Gallery() {
+  const { data: session } = useSession();
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [selectedMedium, setSelectedMedium] = useState("All");
   const [selectedSize, setSelectedSize] = useState("All");
@@ -213,10 +215,10 @@ export default function Gallery() {
 
         {/* Artwork Grid */}
         <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
-          {displayedItems.map((item) => (
+          {displayedItems.map((item, index) => (
             <Link
               key={item._id}
-              href={`/gallery/${item._id}`}
+              href={`/gallery/${item._id}?category=${selectedCategory}&medium=${selectedMedium}&size=${selectedSize}`}
               className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300 block break-inside-avoid"
             >
               <div className="relative w-full">
@@ -227,7 +229,7 @@ export default function Gallery() {
                   height={600}
                   className="w-full h-auto object-contain"
                   sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                  priority={false}
+                  priority={index < 6}
                 />
               </div>
             </Link>

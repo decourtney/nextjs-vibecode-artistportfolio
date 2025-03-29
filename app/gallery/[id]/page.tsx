@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 interface Artwork {
@@ -11,13 +11,22 @@ interface Artwork {
   medium: string;
   size: string;
   imageUrl: string;
+  category: string;
 }
 
-export default function GalleryItem() {
+export default function ArtworkPage() {
   const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [artwork, setArtwork] = useState<Artwork | null>(null);
+  const [allArtworks, setAllArtworks] = useState<Artwork[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // Get filter parameters from URL
+  const category = searchParams.get("category") || "All";
+  const medium = searchParams.get("medium") || "All";
+  const size = searchParams.get("size") || "All";
 
   useEffect(() => {
     const fetchArtwork = async () => {
@@ -29,41 +38,95 @@ export default function GalleryItem() {
         const data = await response.json();
         setArtwork(data);
       } catch (error) {
-        setError(
-          error instanceof Error ? error.message : "Failed to load artwork"
-        );
+        console.error("Error fetching artwork:", error);
+        router.push("/gallery");
       } finally {
         setIsLoading(false);
       }
     };
 
+    const fetchAllArtworks = async () => {
+      try {
+        const response = await fetch("/api/gallery");
+        if (!response.ok) {
+          throw new Error("Failed to fetch artworks");
+        }
+        const data = await response.json();
+        // Filter artworks based on current filters
+        const filteredArtworks = data.artworks.filter((artwork: Artwork) => {
+          const matchesCategory =
+            category === "All" || artwork.category === category;
+          const matchesMedium = medium === "All" || artwork.medium === medium;
+          const matchesSize = size === "All" || artwork.size === size;
+          return matchesCategory && matchesMedium && matchesSize;
+        });
+        setAllArtworks(filteredArtworks || []);
+      } catch (error) {
+        console.error("Error fetching artworks:", error);
+      }
+    };
+
     fetchArtwork();
-  }, [params.id]);
+    fetchAllArtworks();
+  }, [params.id, router, category, medium, size]);
+
+  // Update current index when artwork or allArtworks changes
+  useEffect(() => {
+    if (artwork && allArtworks.length > 0) {
+      const index = allArtworks.findIndex((a) => a._id === artwork._id);
+      if (index !== -1) {
+        setCurrentIndex(index);
+      } else {
+        // If current artwork doesn't match filters, redirect to gallery with current filters
+        router.push(
+          `/gallery?category=${category}&medium=${medium}&size=${size}`
+        );
+      }
+    }
+  }, [artwork, allArtworks, router, category, medium, size]);
+
+  // Add keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") {
+        navigateToArtwork("prev");
+      } else if (e.key === "ArrowRight") {
+        navigateToArtwork("next");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentIndex, allArtworks]);
+
+  const navigateToArtwork = (direction: "prev" | "next") => {
+    if (allArtworks.length === 0) return;
+
+    let newIndex;
+    if (direction === "prev") {
+      newIndex = currentIndex > 0 ? currentIndex - 1 : allArtworks.length - 1;
+    } else {
+      newIndex = currentIndex < allArtworks.length - 1 ? currentIndex + 1 : 0;
+    }
+
+    const nextArtwork = allArtworks[newIndex];
+    if (nextArtwork) {
+      router.push(
+        `/gallery/${nextArtwork._id}?category=${category}&medium=${medium}&size=${size}`
+      );
+    }
+  };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
       </div>
     );
   }
 
-  if (error || !artwork) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-            {error || "Artwork not found"}
-          </h2>
-          <a
-            href="/gallery"
-            className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 inline-block"
-          >
-            Back to Gallery
-          </a>
-        </div>
-      </div>
-    );
+  if (!artwork) {
+    return null;
   }
 
   return (
@@ -71,6 +134,46 @@ export default function GalleryItem() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-white rounded-lg shadow-lg overflow-hidden">
           <div className="relative aspect-[4/3]">
+            {/* Navigation Buttons */}
+            <button
+              onClick={() => navigateToArtwork("prev")}
+              className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 text-white p-2 rounded-full hover:bg-black/70 transition-colors z-10"
+              aria-label="Previous artwork"
+            >
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 19l-7-7 7-7"
+                />
+              </svg>
+            </button>
+            <button
+              onClick={() => navigateToArtwork("next")}
+              className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 text-white p-2 rounded-full hover:bg-black/70 transition-colors z-10"
+              aria-label="Next artwork"
+            >
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5l7 7-7 7"
+                />
+              </svg>
+            </button>
+
             <Image
               src={artwork.imageUrl}
               alt={artwork.title}
@@ -90,7 +193,7 @@ export default function GalleryItem() {
                 <p className="text-gray-600">{artwork.size}</p>
               </div>
               <a
-                href="/gallery"
+                href={`/gallery?category=${category}&medium=${medium}&size=${size}`}
                 className="text-sm text-primary-600 hover:text-primary-700"
               >
                 Back to Gallery

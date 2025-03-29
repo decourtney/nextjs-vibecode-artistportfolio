@@ -28,6 +28,9 @@ export default function Dashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [artworks, setArtworks] = useState<Artwork[]>([]);
+  const [selectedArtworks, setSelectedArtworks] = useState<Set<string>>(
+    new Set()
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -301,6 +304,102 @@ export default function Dashboard() {
     }
   };
 
+  const toggleArtworkSelection = (artworkId: string) => {
+    setSelectedArtworks((prev) => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(artworkId)) {
+        newSelection.delete(artworkId);
+      } else {
+        newSelection.add(artworkId);
+      }
+      return newSelection;
+    });
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedArtworks.size === 0) {
+      toast.error("Please select at least one artwork to delete");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Are you sure you want to delete ${selectedArtworks.size} artworks?`
+      )
+    )
+      return;
+
+    try {
+      const deletePromises = Array.from(selectedArtworks).map((id) =>
+        fetch(`/api/gallery/${id}`, {
+          method: "DELETE",
+        }).then(async (response) => {
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            if (response.status === 403) {
+              throw new Error(
+                "You don't have permission to perform this action. Please contact an administrator."
+              );
+            }
+            throw new Error(errorData.error || "Failed to delete artwork");
+          }
+          return true;
+        })
+      );
+
+      const results = await Promise.allSettled(deletePromises);
+      const successCount = results.filter(
+        (r) => r.status === "fulfilled"
+      ).length;
+      const failureCount = results.filter(
+        (r) => r.status === "rejected"
+      ).length;
+
+      // Check if any failures were due to permission issues
+      const permissionErrors = results.filter(
+        (r) =>
+          r.status === "rejected" &&
+          r.reason instanceof Error &&
+          r.reason.message.includes("don't have permission")
+      );
+
+      if (permissionErrors.length > 0) {
+        toast.error(
+          "You don't have permission to perform this action. Please contact an administrator."
+        );
+        return;
+      }
+
+      if (successCount > 0) {
+        toast.success(
+          `Successfully deleted ${successCount} artwork${
+            successCount !== 1 ? "s" : ""
+          }`
+        );
+        setSelectedArtworks(new Set());
+        loadArtworks();
+      }
+
+      if (failureCount > 0 && permissionErrors.length === 0) {
+        toast.error(
+          `Failed to delete ${failureCount} artwork${
+            failureCount !== 1 ? "s" : ""
+          }`
+        );
+      }
+    } catch (error) {
+      console.error("Error deleting artworks:", error);
+      if (
+        error instanceof Error &&
+        error.message.includes("don't have permission")
+      ) {
+        toast.error(error.message);
+      } else {
+        toast.error("Failed to delete artworks");
+      }
+    }
+  };
+
   if (status === "loading" || isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -310,279 +409,316 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <div className="space-x-4">
-          <button
-            onClick={() => {
-              resetForm();
-            }}
-            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-          >
-            Single Upload
-          </button>
-          <button
-            onClick={() => {
-              resetForm();
-              setIsBatchUpload(true);
-            }}
-            className="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
-          >
-            Batch Upload
-          </button>
-        </div>
-      </div>
-
-      {(isEditing || !editingArtwork || isBatchUpload) && (
-        <form
-          onSubmit={handleSubmit(async (data) => {
-            try {
-              await onSubmit(data);
-            } catch (error) {
-              console.error("Form submission error:", error);
-              if (error instanceof Error) {
-                toast.error(error.message);
-              } else {
-                toast.error(
-                  "You don't have permission to perform this action. Please contact an administrator."
-                );
-              }
-            }
-          })}
-          className="bg-white p-6 rounded-lg shadow-md mb-8"
-        >
-          {!isEditing && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {isBatchUpload ? "Select Multiple Images" : "Image"}
-              </label>
-              <input
-                type="file"
-                id="file"
-                accept="image/*"
-                multiple={isBatchUpload}
-                className="w-full p-2 border rounded"
-                required={!isEditing}
-              />
+    <div className="min-h-screen bg-gray-50 py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* User Info */}
+        {session?.user && (
+          <div className="mb-6 flex justify-between items-center">
+            <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+            <div className="text-sm text-gray-600">
+              Logged in as: {session.user.name || session.user.email}
             </div>
-          )}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {!isBatchUpload && (
+          </div>
+        )}
+
+        <div className="flex justify-end items-center mb-8">
+          <div className="space-x-4">
+            <button
+              onClick={() => {
+                resetForm();
+              }}
+              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+            >
+              Single Upload
+            </button>
+            <button
+              onClick={() => {
+                resetForm();
+                setIsBatchUpload(true);
+              }}
+              className="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
+            >
+              Batch Upload
+            </button>
+          </div>
+        </div>
+
+        {(isEditing || !editingArtwork || isBatchUpload) && (
+          <form
+            onSubmit={handleSubmit(async (data) => {
+              try {
+                await onSubmit(data);
+              } catch (error) {
+                console.error("Form submission error:", error);
+                if (error instanceof Error) {
+                  toast.error(error.message);
+                } else {
+                  toast.error(
+                    "You don't have permission to perform this action. Please contact an administrator."
+                  );
+                }
+              }
+            })}
+            className="bg-white p-6 rounded-lg shadow-md mb-8"
+          >
+            {!isEditing && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Title
+                  {isBatchUpload ? "Select Multiple Images" : "Image"}
                 </label>
                 <input
-                  type="text"
-                  {...register("title")}
+                  type="file"
+                  id="file"
+                  accept="image/*"
+                  multiple={isBatchUpload}
                   className="w-full p-2 border rounded"
+                  required={!isEditing}
                 />
-                {errors.title && (
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {!isBatchUpload && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Title
+                  </label>
+                  <input
+                    type="text"
+                    {...register("title")}
+                    className="w-full p-2 border rounded"
+                  />
+                  {errors.title && (
+                    <p className="text-red-500 text-sm mt-1">
+                      {errors.title.message}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <textarea
+                  {...register("description")}
+                  className="w-full p-2 border rounded"
+                  rows={3}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Category
+                </label>
+                <select
+                  {...register("category")}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="">Select a category</option>
+                  {categories.map((cat) => (
+                    <option key={cat._id} value={cat.label}>
+                      {cat.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.category && (
                   <p className="text-red-500 text-sm mt-1">
-                    {errors.title.message}
+                    {errors.category.message}
                   </p>
                 )}
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Medium
+                </label>
+                <select
+                  {...register("medium")}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="">Select a medium</option>
+                  {mediums.map((med) => (
+                    <option key={med._id} value={med.label}>
+                      {med.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.medium && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.medium.message}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Size
+                </label>
+                <select
+                  {...register("size")}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="">Select a size</option>
+                  {sizes.map((size) => (
+                    <option key={size._id} value={size.label}>
+                      {size.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.size && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.size.message}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Year
+                </label>
+                <input
+                  type="text"
+                  {...register("year")}
+                  className="w-full p-2 border rounded"
+                  placeholder="YYYY"
+                />
+              </div>
+            </div>
+
+            {isUploading && (
+              <div className="mt-4">
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                  <div
+                    className="bg-blue-600 h-2.5 rounded-full"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+                <p className="text-sm text-gray-600 mt-2">
+                  Uploading {processedFiles} of {totalFiles} files (
+                  {Math.round(uploadProgress)}%)
+                </p>
+              </div>
             )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Description
-              </label>
-              <textarea
-                {...register("description")}
-                className="w-full p-2 border rounded"
-                rows={3}
-              />
-            </div>
+            <button
+              type="submit"
+              disabled={isUploading}
+              className="mt-6 bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 disabled:opacity-50"
+            >
+              {isUploading
+                ? "Uploading..."
+                : editingArtwork
+                ? "Update Artwork"
+                : isBatchUpload
+                ? "Upload Files"
+                : "Upload Artwork"}
+            </button>
+          </form>
+        )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Category
-              </label>
-              <select
-                {...register("category")}
-                className="w-full p-2 border rounded"
-              >
-                <option value="">Select a category</option>
-                {categories.map((cat) => (
-                  <option key={cat._id} value={cat.label}>
-                    {cat.label}
-                  </option>
-                ))}
-              </select>
-              {errors.category && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.category.message}
-                </p>
+        <div className="mt-8">
+          {isLoading ? (
+            <div className="flex justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+            </div>
+          ) : artworks.length === 0 ? (
+            <div className="text-center text-gray-500">No artworks found</div>
+          ) : (
+            <>
+              {selectedArtworks.size > 0 && (
+                <div className="mb-4 flex justify-between items-center">
+                  <span className="text-sm text-gray-600">
+                    {selectedArtworks.size} artwork
+                    {selectedArtworks.size !== 1 ? "s" : ""} selected
+                  </span>
+                  <button
+                    onClick={handleBatchDelete}
+                    className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                  >
+                    Delete Selected
+                  </button>
+                </div>
               )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Medium
-              </label>
-              <select
-                {...register("medium")}
-                className="w-full p-2 border rounded"
-              >
-                <option value="">Select a medium</option>
-                {mediums.map((med) => (
-                  <option key={med._id} value={med.label}>
-                    {med.label}
-                  </option>
-                ))}
-              </select>
-              {errors.medium && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.medium.message}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Size
-              </label>
-              <select
-                {...register("size")}
-                className="w-full p-2 border rounded"
-              >
-                <option value="">Select a size</option>
-                {sizes.map((size) => (
-                  <option key={size._id} value={size.label}>
-                    {size.label}
-                  </option>
-                ))}
-              </select>
-              {errors.size && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.size.message}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Year
-              </label>
-              <input
-                type="text"
-                {...register("year")}
-                className="w-full p-2 border rounded"
-                placeholder="YYYY"
-              />
-            </div>
-          </div>
-
-          {isUploading && (
-            <div className="mt-4">
-              <div className="w-full bg-gray-200 rounded-full h-2.5">
-                <div
-                  className="bg-blue-600 h-2.5 rounded-full"
-                  style={{ width: `${uploadProgress}%` }}
-                ></div>
-              </div>
-              <p className="text-sm text-gray-600 mt-2">
-                Uploading {processedFiles} of {totalFiles} files (
-                {Math.round(uploadProgress)}%)
-              </p>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isUploading}
-            className="mt-6 bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 disabled:opacity-50"
-          >
-            {isUploading
-              ? "Uploading..."
-              : editingArtwork
-              ? "Update Artwork"
-              : isBatchUpload
-              ? "Upload Files"
-              : "Upload Artwork"}
-          </button>
-        </form>
-      )}
-
-      <div className="mt-8">
-        {isLoading ? (
-          <div className="flex justify-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-          </div>
-        ) : artworks.length === 0 ? (
-          <div className="text-center text-gray-500">No artworks found</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {artworks.map((artwork) => (
-              <div
-                key={artwork._id}
-                className="bg-white rounded-lg shadow-md overflow-hidden"
-              >
-                <div className="relative aspect-square">
-                  <Image
-                    src={artwork.thumbnailUrl}
-                    alt={artwork.title}
-                    fill
-                    className="object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center">
-                    <div className="opacity-0 hover:opacity-100 transition-opacity duration-200 flex gap-2">
-                      <button
-                        onClick={() => handleEdit(artwork)}
-                        className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(artwork._id)}
-                        className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
-                      >
-                        Delete
-                      </button>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {artworks.map((artwork, index) => (
+                  <div
+                    key={artwork._id}
+                    className="bg-white rounded-lg shadow-md overflow-hidden group"
+                  >
+                    <div className="relative aspect-square">
+                      <div className="absolute top-2 left-2 z-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedArtworks.has(artwork._id)}
+                          onChange={() => toggleArtworkSelection(artwork._id)}
+                          className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                        />
+                      </div>
+                      <Image
+                        src={artwork.thumbnailUrl}
+                        alt={artwork.title}
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
+                        priority={index < 12}
+                      />
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center">
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-2">
+                          <button
+                            onClick={() => handleEdit(artwork)}
+                            className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(artwork._id)}
+                            className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-2">
+                      <h3 className="font-semibold text-sm mb-1 truncate">
+                        {artwork.title}
+                      </h3>
+                      <p className="text-xs text-gray-600 mb-1 truncate">
+                        {artwork.category}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {artwork.medium} • {artwork.size}
+                      </p>
                     </div>
                   </div>
-                </div>
-                <div className="p-4">
-                  <h3 className="font-semibold text-lg mb-1">
-                    {artwork.title}
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-2">
-                    {artwork.category}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {artwork.medium} • {artwork.size}
-                  </p>
-                </div>
+                ))}
               </div>
-            ))}
+            </>
+          )}
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex justify-center gap-2 mt-8">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-4 py-2 border rounded disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="px-4 py-2">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-4 py-2 border rounded disabled:opacity-50"
+            >
+              Next
+            </button>
           </div>
         )}
       </div>
-
-      {totalPages > 1 && (
-        <div className="flex justify-center gap-2 mt-8">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            className="px-4 py-2 border rounded disabled:opacity-50"
-          >
-            Previous
-          </button>
-          <span className="px-4 py-2">
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-            className="px-4 py-2 border rounded disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-      )}
     </div>
   );
 }
