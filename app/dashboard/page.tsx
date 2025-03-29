@@ -10,6 +10,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import TagManager from "../components/TagManager";
 
 const ITEMS_PER_PAGE = 12;
 
@@ -420,6 +421,22 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Tag Management Section */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">
+            Tag Management
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <TagManager
+              type="category"
+              title="Categories"
+              onTagsChange={loadTags}
+            />
+            <TagManager type="medium" title="Mediums" onTagsChange={loadTags} />
+            <TagManager type="size" title="Sizes" onTagsChange={loadTags} />
+          </div>
+        </div>
 
         <div className="flex justify-end items-center mb-8">
           <div className="space-x-4">
