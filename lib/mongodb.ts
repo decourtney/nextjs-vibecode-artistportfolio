@@ -19,18 +19,15 @@ const cached: {
 async function connectDB() {
   try {
     if (cached.conn) {
-      console.log("Using cached MongoDB connection");
       return cached.conn;
     }
 
     if (!cached.promise) {
-      console.log("Creating new MongoDB connection...");
       const opts = {
         bufferCommands: false,
       };
 
       cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-        console.log("MongoDB connected successfully");
         return mongoose;
       });
     }

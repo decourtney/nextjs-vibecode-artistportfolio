@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/authOptions";
 import connectDB from "@/lib/mongodb";
 import { getSignedImageUrl, s3Client } from "@/lib/s3";
-import { sanitizeFilename } from "@/lib/utils";
+import { sanitizeFilename, createThumbnail } from "@/lib/utils";
 import { checkAdminRole } from "@/lib/auth";
 
 // Import Tag model first to ensure it's registered
@@ -131,11 +131,8 @@ export async function POST(request: Request) {
     const size = formData.get("size") as string;
     const image = formData.get("image") as File;
 
-    if (!title || !image) {
-      return NextResponse.json(
-        { error: "Title and image are required" },
-        { status: 400 }
-      );
+    if (!image) {
+      return NextResponse.json({ error: "Image is required" }, { status: 400 });
     }
 
     await connectDB();
@@ -161,51 +158,70 @@ export async function POST(request: Request) {
 
     // Process image
     const buffer = Buffer.from(await image.arrayBuffer());
-    const filename = sanitizeFilename(title);
-    const imageKey = `genacourtney/images/${filename}`;
-    const thumbnailKey = `genacourtney/images/thumbnails/${filename.replace(
-      ".webp",
-      "-thumbnail.webp"
-    )}`;
+    const filename = sanitizeFilename(
+      title || image.name.replace(/\.[^/.]+$/, "")
+    );
+    const imageKey = `genacourtney/images/${filename}.webp`;
+    const thumbnailKey = `genacourtney/images/thumbnails/${filename}-thumbnail.webp`;
 
-    // Upload to S3
-    const uploadCommand = new PutObjectCommand({
-      Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET,
-      Key: imageKey,
-      Body: buffer,
-      ContentType: "image/webp",
-    });
-    await s3Client.send(uploadCommand);
+    try {
+      // Create thumbnail
+      const thumbnailBuffer = await createThumbnail(buffer);
 
-    // Create artwork in database
-    const artwork = await Artwork.create({
-      name: title,
-      description: description || "",
-      categories: [categoryTag._id],
-      medium: mediumTag._id,
-      size: sizeTag._id,
-      src: `https://${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}.s3.${process.env.NEXT_PUBLIC_AWS_REGION}.amazonaws.com/${imageKey}`,
-      thumbSrc: `https://${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}.s3.${process.env.NEXT_PUBLIC_AWS_REGION}.amazonaws.com/${thumbnailKey}`,
-    });
+      // Upload original image to S3
+      const uploadCommand = new PutObjectCommand({
+        Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET,
+        Key: imageKey,
+        Body: buffer,
+        ContentType: "image/webp",
+      });
+      await s3Client.send(uploadCommand);
 
-    // Transform the response to match the expected format
-    const transformedArtwork = {
-      _id: artwork._id,
-      title: artwork.name,
-      description: artwork.description,
-      category: categoryTag.label,
-      medium: mediumTag.label,
-      size: sizeTag.label,
-      dimensions: "Unknown",
-      year: new Date().getFullYear(),
-      imageUrl: artwork.src,
-      thumbnailUrl: artwork.thumbSrc,
-      tags: [categoryTag.label],
-    };
+      // Upload thumbnail to S3
+      const thumbnailCommand = new PutObjectCommand({
+        Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET,
+        Key: thumbnailKey,
+        Body: thumbnailBuffer,
+        ContentType: "image/webp",
+      });
+      await s3Client.send(thumbnailCommand);
 
-    return NextResponse.json(transformedArtwork);
-  } catch (err) {
-    console.error("Error creating artwork:", err);
+      // Create artwork in database
+      const artwork = await Artwork.create({
+        name: title || filename,
+        description: description || "",
+        categories: [categoryTag._id],
+        medium: mediumTag._id,
+        size: sizeTag._id,
+        src: `https://${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}.s3.${process.env.NEXT_PUBLIC_AWS_REGION}.amazonaws.com/${imageKey}`,
+        thumbSrc: `https://${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}.s3.${process.env.NEXT_PUBLIC_AWS_REGION}.amazonaws.com/${thumbnailKey}`,
+      });
+
+      // Transform the response to match the expected format
+      const transformedArtwork = {
+        _id: artwork._id,
+        title: artwork.name,
+        description: artwork.description,
+        category: categoryTag.label,
+        medium: mediumTag.label,
+        size: sizeTag.label,
+        dimensions: "Unknown",
+        year: new Date().getFullYear(),
+        imageUrl: artwork.src,
+        thumbnailUrl: artwork.thumbSrc,
+        tags: [categoryTag.label],
+      };
+
+      return NextResponse.json(transformedArtwork);
+    } catch (error) {
+      console.error("Error processing image:", error);
+      return NextResponse.json(
+        { error: "Failed to process image" },
+        { status: 500 }
+      );
+    }
+  } catch (error) {
+    console.error("Error creating artwork:", error);
     return NextResponse.json(
       { error: "Failed to create artwork" },
       { status: 500 }

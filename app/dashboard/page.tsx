@@ -159,112 +159,49 @@ export default function Dashboard() {
     }
   };
 
-  const onSubmit = async (data: ArtworkFormData) => {
+  const onSubmitForm = async (data: ArtworkFormData) => {
+    if (!formData.image) {
+      toast.error("Please select an image");
+      return;
+    }
+
     try {
       setIsUploading(true);
+      const formDataToSend = new FormData();
+      formDataToSend.append("title", data.title || "");
+      formDataToSend.append("description", data.description || "");
+      formDataToSend.append("category", data.category || "");
+      formDataToSend.append("medium", data.medium || "");
+      formDataToSend.append("size", data.size || "");
+      formDataToSend.append("image", formData.image);
 
-      if (isEditing && editingArtwork) {
-        // Handle update
-        const response = await fetch(`/api/gallery/${editingArtwork._id}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(data),
-        });
+      const response = await fetch("/api/gallery", {
+        method: "POST",
+        body: formDataToSend,
+      });
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          if (response.status === 403) {
-            throw new Error(
-              "You don't have permission to perform this action. Please contact an administrator."
-            );
-          }
-          throw new Error(errorData.error || "Failed to update artwork");
-        }
-
-        toast.success("Artwork updated successfully");
-        // First load the updated artworks
-        await loadArtworks();
-        // Then reset the form state
-        resetForm();
-      } else {
-        // Handle upload
-        const fileInput = document.getElementById("file") as HTMLInputElement;
-        const files = fileInput?.files;
-
-        if (!files?.length) {
-          toast.error("Please select at least one file");
-          return;
-        }
-
-        setTotalFiles(files.length);
-        setProcessedFiles(0);
-        let successCount = 0;
-
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const formData = new FormData();
-          formData.append("file", file);
-
-          // For batch upload, use the file's name as the title
-          const artworkData = {
-            ...data,
-            title: isBatchUpload
-              ? file.name.replace(/\.[^/.]+$/, "")
-              : data.title || file.name.replace(/\.[^/.]+$/, ""),
-          };
-
-          formData.append("data", JSON.stringify(artworkData));
-          formData.append("isBatchUpload", isBatchUpload.toString());
-
-          try {
-            const response = await fetch("/api/gallery", {
-              method: "POST",
-              body: formData,
-            });
-
-            const responseData = await response.json();
-
-            if (!response.ok) {
-              if (response.status === 403) {
-                throw new Error(
-                  "You don't have permission to perform this action. Please contact an administrator."
-                );
-              }
-              throw new Error(
-                responseData.error || `Failed to upload ${file.name}`
-              );
-            }
-
-            successCount++;
-            setProcessedFiles(i + 1);
-            setUploadProgress(((i + 1) / files.length) * 100);
-          } catch (error) {
-            if (
-              error instanceof Error &&
-              error.message.includes("don't have permission")
-            ) {
-              toast.error(error.message);
-            } else {
-              toast.error(`Failed to upload ${file.name}`);
-            }
-            break; // Stop processing other files if we hit a permission error
-          }
-        }
-
-        if (successCount > 0) {
-          toast.success(
-            `Successfully uploaded ${successCount} of ${files.length} artworks`
-          );
-          // First load the updated artworks
-          await loadArtworks();
-          // Then reset the form state
-          resetForm();
-        }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to upload artwork");
       }
+
+      const responseData = await response.json();
+      toast.success("Artwork uploaded successfully");
+      setFormData({
+        title: "",
+        description: "",
+        category: "",
+        medium: "",
+        size: "",
+        price: "",
+        image: null,
+      });
+      loadArtworks();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Operation failed");
+      console.error("Error uploading artwork:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to upload artwork"
+      );
     } finally {
       setIsUploading(false);
     }
@@ -478,20 +415,7 @@ export default function Dashboard() {
 
         {(isEditing || !editingArtwork || isBatchUpload) && (
           <form
-            onSubmit={handleSubmit(async (data) => {
-              try {
-                await onSubmit(data);
-              } catch (error) {
-                console.error("Form submission error:", error);
-                if (error instanceof Error) {
-                  toast.error(error.message);
-                } else {
-                  toast.error(
-                    "You don't have permission to perform this action. Please contact an administrator."
-                  );
-                }
-              }
-            })}
+            onSubmit={handleSubmit(onSubmitForm)}
             className="bg-white p-6 rounded-lg shadow-md mb-8"
           >
             {!isEditing && (
@@ -506,6 +430,12 @@ export default function Dashboard() {
                   multiple={isBatchUpload}
                   className="w-full p-2 border rounded"
                   required={!isEditing}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setFormData((prev) => ({ ...prev, image: file }));
+                    }
+                  }}
                 />
               </div>
             )}

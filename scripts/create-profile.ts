@@ -15,7 +15,6 @@ async function createProfile(email: string) {
 
   try {
     await mongoose.connect(uri);
-    console.log("Connected to MongoDB");
 
     // First, get the user's ID from the users collection
     const client = new MongoClient(uri);
