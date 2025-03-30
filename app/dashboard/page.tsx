@@ -185,7 +185,6 @@ export default function Dashboard() {
         throw new Error(errorData.error || "Failed to upload artwork");
       }
 
-      const responseData = await response.json();
       toast.success("Artwork uploaded successfully");
       setFormData({
         title: "",
