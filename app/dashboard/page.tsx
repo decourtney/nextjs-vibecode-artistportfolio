@@ -160,6 +160,46 @@ export default function Dashboard() {
   };
 
   const onSubmitForm = async (data: ArtworkFormData) => {
+    if (isEditing && editingArtwork) {
+      // Handle update
+      try {
+        setIsUploading(true);
+        const formDataToSend = new FormData();
+        formDataToSend.append("title", data.title || editingArtwork.title);
+        formDataToSend.append(
+          "description",
+          data.description || editingArtwork.description
+        );
+        // Only append category, medium, and size if they have values
+        if (data.category) formDataToSend.append("category", data.category);
+        if (data.medium) formDataToSend.append("medium", data.medium);
+        if (data.size) formDataToSend.append("size", data.size);
+
+        const response = await fetch(`/api/gallery/${editingArtwork._id}`, {
+          method: "PUT",
+          body: formDataToSend,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to update artwork");
+        }
+
+        toast.success("Artwork updated successfully");
+        loadArtworks();
+        resetForm();
+      } catch (error) {
+        console.error("Error updating artwork:", error);
+        toast.error(
+          error instanceof Error ? error.message : "Failed to update artwork"
+        );
+      } finally {
+        setIsUploading(false);
+      }
+      return;
+    }
+
+    // Handle new upload
     const fileInput = document.getElementById("file") as HTMLInputElement;
     const files = fileInput?.files;
 
@@ -182,9 +222,10 @@ export default function Dashboard() {
           isBatchUpload ? file.name.replace(/\.[^/.]+$/, "") : data.title || ""
         );
         formDataToSend.append("description", data.description || "");
-        formDataToSend.append("category", data.category || "");
-        formDataToSend.append("medium", data.medium || "");
-        formDataToSend.append("size", data.size || "");
+        // Only append category, medium, and size if they have values
+        if (data.category) formDataToSend.append("category", data.category);
+        if (data.medium) formDataToSend.append("medium", data.medium);
+        if (data.size) formDataToSend.append("size", data.size);
         formDataToSend.append("image", file);
 
         const response = await fetch("/api/gallery", {
@@ -206,15 +247,7 @@ export default function Dashboard() {
         toast.success(
           `Successfully uploaded ${successCount} of ${files.length} artworks`
         );
-        setFormData({
-          title: "",
-          description: "",
-          category: "",
-          medium: "",
-          size: "",
-          price: "",
-          image: null,
-        });
+        resetForm();
         loadArtworks();
       }
     } catch (error) {
@@ -497,11 +530,8 @@ export default function Dashboard() {
                   Category
                 </label>
                 <select
-                  value={formData.category}
-                  onChange={(e) =>
-                    setFormData({ ...formData, category: e.target.value })
-                  }
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                  {...register("category")}
+                  className="w-full p-2 border rounded"
                 >
                   <option value="">Select a category</option>
                   {categories.map((cat) => (
