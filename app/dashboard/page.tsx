@@ -160,42 +160,63 @@ export default function Dashboard() {
   };
 
   const onSubmitForm = async (data: ArtworkFormData) => {
-    if (!formData.image) {
-      toast.error("Please select an image");
+    const fileInput = document.getElementById("file") as HTMLInputElement;
+    const files = fileInput?.files;
+
+    if (!files?.length) {
+      toast.error("Please select at least one file");
       return;
     }
 
     try {
       setIsUploading(true);
-      const formDataToSend = new FormData();
-      formDataToSend.append("title", data.title || "");
-      formDataToSend.append("description", data.description || "");
-      formDataToSend.append("category", data.category || "");
-      formDataToSend.append("medium", data.medium || "");
-      formDataToSend.append("size", data.size || "");
-      formDataToSend.append("image", formData.image);
+      setTotalFiles(files.length);
+      setProcessedFiles(0);
+      let successCount = 0;
 
-      const response = await fetch("/api/gallery", {
-        method: "POST",
-        body: formDataToSend,
-      });
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const formDataToSend = new FormData();
+        formDataToSend.append(
+          "title",
+          isBatchUpload ? file.name.replace(/\.[^/.]+$/, "") : data.title || ""
+        );
+        formDataToSend.append("description", data.description || "");
+        formDataToSend.append("category", data.category || "");
+        formDataToSend.append("medium", data.medium || "");
+        formDataToSend.append("size", data.size || "");
+        formDataToSend.append("image", file);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to upload artwork");
+        const response = await fetch("/api/gallery", {
+          method: "POST",
+          body: formDataToSend,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Failed to upload ${file.name}`);
+        }
+
+        successCount++;
+        setProcessedFiles(i + 1);
+        setUploadProgress(((i + 1) / files.length) * 100);
       }
 
-      toast.success("Artwork uploaded successfully");
-      setFormData({
-        title: "",
-        description: "",
-        category: "",
-        medium: "",
-        size: "",
-        price: "",
-        image: null,
-      });
-      loadArtworks();
+      if (successCount > 0) {
+        toast.success(
+          `Successfully uploaded ${successCount} of ${files.length} artworks`
+        );
+        setFormData({
+          title: "",
+          description: "",
+          category: "",
+          medium: "",
+          size: "",
+          price: "",
+          image: null,
+        });
+        loadArtworks();
+      }
     } catch (error) {
       console.error("Error uploading artwork:", error);
       toast.error(
@@ -203,6 +224,9 @@ export default function Dashboard() {
       );
     } finally {
       setIsUploading(false);
+      setTotalFiles(0);
+      setProcessedFiles(0);
+      setUploadProgress(0);
     }
   };
 
