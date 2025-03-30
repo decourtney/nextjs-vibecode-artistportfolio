@@ -4,7 +4,7 @@ import { TagType } from "@/types/tagType";
 export interface TagDocument extends Document {
   _id: string;
   label: string;
-  type: TagType; 
+  type: TagType;
 }
 
 const TagSchema = new Schema<TagDocument>(
@@ -24,6 +24,8 @@ const TagSchema = new Schema<TagDocument>(
   },
   { timestamps: true }
 );
+
+TagSchema.index({ label: 1, type: 1 }, { unique: true });
 
 export default mongoose.models.Tag ||
   mongoose.model<TagDocument>("Tag", TagSchema);

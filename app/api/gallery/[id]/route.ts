@@ -53,7 +53,7 @@ export async function GET(
       title: artwork.name,
       description: artwork.description,
       category: artwork.categories[0]?.label || "Uncategorized",
-      medium: artwork.medium?.label || "Unknown",
+      medium: artwork.medium?.label || "Mixed Media",
       size: artwork.size?.label || "Unknown",
       dimensions:
         artwork.metaWidth && artwork.metaHeight
@@ -89,160 +89,92 @@ export async function PUT(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const data = await request.json();
+    const formData = await request.formData();
+    const { id } = await params;
+    const title = formData.get("title") as string;
+    const description = formData.get("description") as string;
+    const category = formData.get("category") as string;
+    const medium = formData.get("medium") as string;
+    const size = formData.get("size") as string;
+
     await connectDB();
 
-    // Get the ID from params
-    const { id } = await params;
-
-    // First get the existing artwork to check if title changed
-    const existingArtwork = await Artwork.findById(id);
+    // First get the existing artwork to check current tags
+    const existingArtwork = await Artwork.findById(id).populate(
+      "categories medium size"
+    );
     if (!existingArtwork) {
       return NextResponse.json({ error: "Artwork not found" }, { status: 404 });
     }
 
-    // Create or find tags
+    // Create or find tags using findOneAndUpdate with upsert
     const categoryTag = await Tag.findOneAndUpdate(
-      { label: data.category || "Uncategorized", type: "category" },
-      { label: data.category || "Uncategorized", type: "category" },
+      {
+        label:
+          category || existingArtwork.categories[0]?.label || "Uncategorized",
+        type: "category",
+      },
+      {
+        label:
+          category || existingArtwork.categories[0]?.label || "Uncategorized",
+        type: "category",
+      },
       { upsert: true, new: true }
     );
 
     const mediumTag = await Tag.findOneAndUpdate(
-      { label: data.medium || "Mixed Media", type: "medium" },
-      { label: data.medium || "Mixed Media", type: "medium" },
+      {
+        label: medium || existingArtwork.medium?.label || "Mixed Media",
+        type: "medium",
+      },
+      {
+        label: medium || existingArtwork.medium?.label || "Mixed Media",
+        type: "medium",
+      },
       { upsert: true, new: true }
     );
 
     const sizeTag = await Tag.findOneAndUpdate(
-      { label: data.size || "Various", type: "size" },
-      { label: data.size || "Various", type: "size" },
+      { label: size || existingArtwork.size?.label || "Unknown", type: "size" },
+      { label: size || existingArtwork.size?.label || "Unknown", type: "size" },
       { upsert: true, new: true }
     );
 
-    // If title changed, update S3 filenames
-    if (data.title !== existingArtwork.name) {
-      try {
-        // Extract current filenames
-        const originalUrl = new URL(existingArtwork.src);
-        const thumbnailUrl = new URL(existingArtwork.thumbSrc);
+    // Update artwork in MongoDB
+    const artwork = await Artwork.findByIdAndUpdate(
+      id,
+      {
+        name: title || existingArtwork.name,
+        description: description || existingArtwork.description,
+        categories: [categoryTag._id],
+        medium: mediumTag._id,
+        size: sizeTag._id,
+      },
+      { new: true }
+    ).populate("categories medium size");
 
-        // Get the pathname and remove leading slash
-        const originalPath = originalUrl.pathname.slice(1);
-        const thumbnailPath = thumbnailUrl.pathname.slice(1);
-
-        // Create new filenames based on new title
-        const newFilename = sanitizeFilename(data.title);
-        const newImageKey = `genacourtney/images/${newFilename}`;
-        const newThumbnailKey = `genacourtney/images/thumbnails/${newFilename.replace(
-          ".webp",
-          "-thumbnail.webp"
-        )}`;
-
-        // Copy files to new locations
-        const copyCommand = new CopyObjectCommand({
-          Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET,
-          CopySource: `${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}/${originalPath}`,
-          Key: newImageKey,
-        });
-        await s3Client.send(copyCommand);
-
-        const copyThumbnailCommand = new CopyObjectCommand({
-          Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET,
-          CopySource: `${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}/${thumbnailPath}`,
-          Key: newThumbnailKey,
-        });
-        await s3Client.send(copyThumbnailCommand);
-
-        // Only delete old files after successful copy
-        try {
-          const deleteOriginalCommand = new DeleteObjectCommand({
-            Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET,
-            Key: originalPath,
-          });
-          await s3Client.send(deleteOriginalCommand);
-
-          const deleteThumbnailCommand = new DeleteObjectCommand({
-            Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET,
-            Key: thumbnailPath,
-          });
-          await s3Client.send(deleteThumbnailCommand);
-        } catch (deleteError) {
-          console.error("Error deleting old files:", deleteError);
-          // Continue even if deletion fails, as the files are already copied
-        }
-
-        // Update artwork with new URLs
-        const artwork = await Artwork.findByIdAndUpdate(
-          id,
-          {
-            name: data.title,
-            description: data.description || "",
-            categories: [categoryTag._id],
-            medium: mediumTag._id,
-            size: sizeTag._id,
-            src: `https://${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}.s3.${process.env.NEXT_PUBLIC_AWS_REGION}.amazonaws.com/${newImageKey}`,
-            thumbSrc: `https://${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}.s3.${process.env.NEXT_PUBLIC_AWS_REGION}.amazonaws.com/${newThumbnailKey}`,
-          },
-          { new: true }
-        );
-
-        // Transform the response to match the expected format
-        const transformedArtwork = {
-          _id: artwork._id,
-          title: artwork.name,
-          description: artwork.description,
-          category: categoryTag.label,
-          medium: mediumTag.label,
-          size: sizeTag.label,
-          dimensions: "Unknown",
-          year: data.year || "",
-          imageUrl: artwork.src,
-          thumbnailUrl: artwork.thumbSrc,
-          tags: [categoryTag.label],
-        };
-
-        return NextResponse.json(transformedArtwork);
-      } catch (s3Error) {
-        console.error("Error updating S3 files:", s3Error);
-        return NextResponse.json(
-          { error: "Failed to update S3 files" },
-          { status: 500 }
-        );
-      }
-    } else {
-      // If title didn't change, just update other fields
-      const artwork = await Artwork.findByIdAndUpdate(
-        id,
-        {
-          name: data.title,
-          description: data.description || "",
-          categories: [categoryTag._id],
-          medium: mediumTag._id,
-          size: sizeTag._id,
-        },
-        { new: true }
-      );
-
-      // Transform the response to match the expected format
-      const transformedArtwork = {
-        _id: artwork._id,
-        title: artwork.name,
-        description: artwork.description,
-        category: categoryTag.label,
-        medium: mediumTag.label,
-        size: sizeTag.label,
-        dimensions: "Unknown",
-        year: data.year || "",
-        imageUrl: artwork.src,
-        thumbnailUrl: artwork.thumbSrc,
-        tags: [categoryTag.label],
-      };
-
-      return NextResponse.json(transformedArtwork);
+    if (!artwork) {
+      return NextResponse.json({ error: "Artwork not found" }, { status: 404 });
     }
-  } catch (err) {
-    console.error("Error updating artwork:", err);
+
+    // Transform the response to match the expected format
+    const transformedArtwork = {
+      _id: artwork._id,
+      title: artwork.name,
+      description: artwork.description,
+      category: artwork.categories[0]?.label || "Uncategorized",
+      medium: artwork.medium?.label || "Unknown",
+      size: artwork.size?.label || "Unknown",
+      dimensions: "Unknown",
+      year: new Date().getFullYear(),
+      imageUrl: artwork.src,
+      thumbnailUrl: artwork.thumbSrc,
+      tags: artwork.categories.map((cat: { label: string }) => cat.label),
+    };
+
+    return NextResponse.json(transformedArtwork);
+  } catch (error) {
+    console.error("Error updating artwork:", error);
     return NextResponse.json(
       { error: "Failed to update artwork" },
       { status: 500 }

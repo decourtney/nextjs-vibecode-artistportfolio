@@ -151,8 +151,8 @@ export async function POST(request: Request) {
     );
 
     const sizeTag = await Tag.findOneAndUpdate(
-      { label: size || "Various", type: "size" },
-      { label: size || "Various", type: "size" },
+      { label: size || "Unknown", type: "size" },
+      { label: size || "Unknown", type: "size" },
       { upsert: true, new: true }
     );
 
@@ -188,7 +188,7 @@ export async function POST(request: Request) {
 
       // Create artwork in database
       const artwork = await Artwork.create({
-        name: title || filename,
+        name: (title || filename).slice(0, 60),
         description: description || "",
         categories: [categoryTag._id],
         medium: mediumTag._id,
