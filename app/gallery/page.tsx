@@ -172,7 +172,7 @@ export default function Gallery() {
           <div>
             <label
               htmlFor="medium"
-              className="block text-sm font-bold text-gray-700 mb-1"
+              className="block text-sm font-medium text-gray-700 mb-1"
             >
               Medium
             </label>
