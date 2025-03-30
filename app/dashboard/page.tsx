@@ -10,6 +10,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import TagManager from "../components/TagManager";
+import { useInView } from "react-intersection-observer";
 
 const artworkSchema = z.object({
   title: z.string().optional(),
@@ -31,16 +32,16 @@ interface DashboardTag {
 interface GalleryResponse {
   artworks: Artwork[];
   total: number;
-  totalPages: number;
+  hasMore: boolean;
+  returnedCount: number;
 }
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [artworks, setArtworks] = useState<GalleryResponse | null>(null);
+  const [artworks, setArtworks] = useState<Artwork[]>([]);
+  const [totalArtworks, setTotalArtworks] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages] = useState(1);
   const [selectedArtworks, setSelectedArtworks] = useState<string[]>([]);
   const [categories, setCategories] = useState<DashboardTag[]>([]);
   const [mediums, setMediums] = useState<DashboardTag[]>([]);
@@ -52,6 +53,14 @@ export default function Dashboard() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [totalFiles, setTotalFiles] = useState(0);
   const [processedFiles, setProcessedFiles] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const ITEMS_PER_PAGE = 20;
+  const { ref, inView } = useInView({
+    threshold: 0,
+    rootMargin: "100px",
+  });
 
   const {
     register,
@@ -64,17 +73,80 @@ export default function Dashboard() {
 
   const loadArtworks = useCallback(async () => {
     try {
-      setIsLoading(true);
-      const response = await fetch("/api/gallery");
+      if (offset === 0) {
+        setIsLoading(true);
+      } else {
+        setIsLoadingMore(true);
+      }
+
+      const page = Math.floor(offset / ITEMS_PER_PAGE) + 1;
+      const response = await fetch(
+        `/api/gallery?page=${page}&limit=${ITEMS_PER_PAGE}`
+      );
       if (!response.ok) throw new Error("Failed to fetch artworks");
-      const data = await response.json();
-      setArtworks(data);
+      const data: GalleryResponse = await response.json();
+
+
+
+      // Set total artworks count
+      setTotalArtworks(data.total);
+
+      // If it's the first load, replace the artworks
+      // Otherwise, append to existing artworks
+      setArtworks((prev) => {
+        if (offset === 0) {
+          return data.artworks;
+        }
+
+        // Check for duplicates before adding new artworks
+        const newArtworks = data.artworks.filter(
+          (newArtwork: Artwork) =>
+            !prev.some((existing) => existing._id === newArtwork._id)
+        );
+
+        const updatedArtworks = [...prev, ...newArtworks];
+        return updatedArtworks;
+      });
+
+      // Set hasMore based on the API response
+      setHasMore(data.hasMore);
+
+      // If we got fewer items than requested, we've reached the end
+      if (data.returnedCount < ITEMS_PER_PAGE) {
+        setHasMore(false);
+      }
     } catch (error) {
       console.error("Error loading artworks:", error);
       toast.error("Failed to load artworks");
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
     }
+  }, [offset]);
+
+  // Handle infinite scroll
+  useEffect(() => {
+    if (inView && !isLoading && !isLoadingMore && hasMore) {
+      const nextOffset = offset + ITEMS_PER_PAGE;
+      if (nextOffset < totalArtworks) {
+        setOffset(nextOffset);
+      }
+    }
+  }, [inView, isLoading, isLoadingMore, hasMore, offset, totalArtworks]);
+
+  // Load artworks when offset changes
+  useEffect(() => {
+    if (offset >= 0) {
+      loadArtworks();
+    }
+  }, [offset, loadArtworks]);
+
+  // Reset offset when component mounts
+  useEffect(() => {
+    setOffset(0);
+    setArtworks([]);
+    setHasMore(true);
+    loadTags(); // Load tags when component mounts
   }, []);
 
   useEffect(() => {
@@ -83,12 +155,14 @@ export default function Dashboard() {
     }
   }, [status, router]);
 
+  // Load artworks when session is available
   useEffect(() => {
-    if (session) {
+    if (session && offset === 0) {
       loadArtworks();
-      loadTags();
     }
-  }, [session, currentPage, loadArtworks]);
+  }, [session, loadArtworks, offset]);
+
+  // Debug render
 
   const loadTags = async () => {
     try {
@@ -621,40 +695,46 @@ export default function Dashboard() {
             <div className="flex justify-center items-center h-64">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
             </div>
-          ) : !artworks?.artworks?.length ? (
+          ) : !artworks?.length ? (
             <div className="text-center text-gray-500">No artworks found</div>
           ) : (
             <>
-              {selectedArtworks.length > 0 && (
-                <div className="mb-4 flex justify-between items-center">
-                  <span className="text-sm text-gray-600">
-                    {selectedArtworks.length} artwork
-                    {selectedArtworks.length !== 1 ? "s" : ""} selected
-                  </span>
-                  <button
-                    onClick={handleBatchDelete}
-                    className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-                  >
-                    Delete Selected
-                  </button>
+              <div className="flex justify-between items-center mb-6">
+                <div className="text-sm text-gray-600">
+                  Total Artworks: {totalArtworks} (Loaded: {artworks.length})
                 </div>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                {(artworks?.artworks || []).map(
-                  (artwork: Artwork, index: number) => (
-                    <div
-                      key={artwork._id}
-                      className="bg-white rounded-lg shadow-md overflow-hidden group"
+                {selectedArtworks.length > 0 && (
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm text-gray-600">
+                      {selectedArtworks.length} artwork
+                      {selectedArtworks.length !== 1 ? "s" : ""} selected
+                    </span>
+                    <button
+                      onClick={handleBatchDelete}
+                      className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
                     >
-                      <div className="relative aspect-square">
-                        <div className="absolute top-2 left-2 z-10">
-                          <input
-                            type="checkbox"
-                            checked={selectedArtworks.includes(artwork._id)}
-                            onChange={() => toggleArtworkSelection(artwork._id)}
-                            className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                          />
-                        </div>
+                      Delete Selected
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {artworks.map((artwork: Artwork, index: number) => (
+                  <div
+                    key={artwork._id}
+                    className="relative group bg-white rounded-lg shadow-md overflow-hidden aspect-square"
+                  >
+                    <div className="absolute top-2 left-2 z-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedArtworks.includes(artwork._id)}
+                        onChange={() => toggleArtworkSelection(artwork._id)}
+                        className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="relative w-full h-full">
+                      {artwork.thumbnailUrl &&
+                      artwork.thumbnailUrl.trim() !== "" ? (
                         <Image
                           src={artwork.thumbnailUrl}
                           alt={artwork.title}
@@ -663,63 +743,59 @@ export default function Dashboard() {
                           sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
                           priority={index < 12}
                         />
-                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center">
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-2">
-                            <button
-                              onClick={() => handleEdit(artwork)}
-                              className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDelete(artwork._id)}
-                              className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
-                            >
-                              Delete
-                            </button>
-                          </div>
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                          <span className="text-gray-400">
+                            No image available
+                          </span>
                         </div>
-                      </div>
-                      <div className="p-2">
-                        <h3 className="font-semibold text-sm mb-1 truncate">
-                          {artwork.title}
-                        </h3>
-                        <p className="text-xs text-gray-600 mb-1 truncate">
-                          {artwork.category}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">
-                          {artwork.medium} • {artwork.size}
-                        </p>
+                      )}
+                    </div>
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-200 flex items-center justify-center">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-2">
+                        <button
+                          onClick={() => handleEdit(artwork)}
+                          className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(artwork._id)}
+                          className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
-                  )
-                )}
+                    <div className="absolute bottom-0 left-0 right-0 p-2 bg-white bg-opacity-90">
+                      <h3 className="font-semibold text-sm mb-1 truncate">
+                        {artwork.title}
+                      </h3>
+                      <p className="text-xs text-gray-600 mb-1 truncate">
+                        {artwork.category}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {artwork.medium} • {artwork.size}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
+
+              {/* Loading indicators */}
+              {isLoadingMore && (
+                <div className="flex justify-center items-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+                </div>
+              )}
+
+              {/* Infinite scroll trigger */}
+              {!isLoading && !isLoadingMore && hasMore && (
+                <div ref={ref} className="h-10" />
+              )}
             </>
           )}
         </div>
-
-        {totalPages > 1 && (
-          <div className="flex justify-center gap-2 mt-8">
-            <button
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="px-4 py-2 border rounded disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <span className="px-4 py-2">
-              Page {currentPage} of {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="px-4 py-2 border rounded disabled:opacity-50"
-            >
-              Next
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

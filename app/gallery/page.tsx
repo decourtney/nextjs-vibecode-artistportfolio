@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useInView } from "react-intersection-observer";
+import { toast } from "sonner";
 
 interface Artwork {
   _id: string;
@@ -32,23 +33,16 @@ export default function Gallery() {
   const [sizes, setSizes] = useState<string[]>(["All"]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const { ref, inView } = useInView({
     threshold: 0,
   });
 
-  // Load filter options and artworks on mount
+  // Load filter options on mount
   useEffect(() => {
-    const loadData = async () => {
+    const loadFilterOptions = async () => {
       try {
-        // Load artworks
-        const artworksResponse = await fetch("/api/gallery");
-        if (!artworksResponse.ok) {
-          throw new Error("Failed to fetch artworks");
-        }
-        const artworksData = await artworksResponse.json();
-        setArtworks(artworksData.artworks || []);
-
-        // Load filter options
         const [categoriesResponse, mediumsResponse, sizesResponse] =
           await Promise.all([
             fetch("/api/tags?type=category"),
@@ -84,46 +78,78 @@ export default function Gallery() {
         ]);
       } catch (error) {
         setError(
-          error instanceof Error ? error.message : "Failed to load data"
+          error instanceof Error
+            ? error.message
+            : "Failed to load filter options"
         );
-        setArtworks([]);
-      } finally {
-        setIsLoading(false);
       }
     };
-    loadData();
+    loadFilterOptions();
   }, []);
 
-  const filteredItems = artworks.filter((item) => {
-    const categoryMatch =
-      selectedCategory === "All" || item.category === selectedCategory;
-    const mediumMatch =
-      selectedMedium === "All" || item.medium === selectedMedium;
-    const sizeMatch = selectedSize === "All" || item.size === selectedSize;
-    return categoryMatch && mediumMatch && sizeMatch;
-  });
+  const loadArtworks = useCallback(async () => {
+    try {
+      if (page === 1) {
+        setIsLoading(true);
+      } else {
+        setIsLoadingMore(true);
+      }
 
-  const displayedItems = filteredItems.slice(0, page * ITEMS_PER_PAGE);
+      const response = await fetch(
+        `/api/gallery?page=${page}&limit=${ITEMS_PER_PAGE}${
+          selectedCategory !== "All" ? `&category=${selectedCategory}` : ""
+        }${selectedMedium !== "All" ? `&medium=${selectedMedium}` : ""}${
+          selectedSize !== "All" ? `&size=${selectedSize}` : ""
+        }`
+      );
+      if (!response.ok) throw new Error("Failed to fetch artworks");
+      const data = await response.json();
 
-  // Handle infinite scroll and filter changes
-  useEffect(() => {
-    if (inView && displayedItems.length < filteredItems.length) {
-      setPage((prev) => prev + 1);
+      // If it's the first page, replace the artworks
+      // Otherwise, append to existing artworks
+      setArtworks((prev) => {
+        if (page === 1) return data.artworks;
+
+        // Check for duplicates before adding new artworks
+        const newArtworks = data.artworks.filter(
+          (newArtwork: Artwork) =>
+            !prev.some((existing) => existing._id === newArtwork._id)
+        );
+
+        return [...prev, ...newArtworks];
+      });
+
+      // Set hasMore based on whether we've reached the total number of artworks
+      // Compare the current number of loaded artworks with the total from the API
+      const currentLoadedCount = page * ITEMS_PER_PAGE;
+      setHasMore(currentLoadedCount < data.total);
+    } catch (error) {
+      console.error("Error loading artworks:", error);
+      toast.error("Failed to load artworks");
+    } finally {
+      setIsLoading(false);
+      setIsLoadingMore(false);
     }
-  }, [inView, filteredItems.length, displayedItems.length]);
+  }, [page, selectedCategory, selectedMedium, selectedSize]);
 
-  // Reset page when filters change
+  // Reset page and artworks when filters change
   useEffect(() => {
     setPage(1);
+    setArtworks([]);
+    setHasMore(true);
   }, [selectedCategory, selectedMedium, selectedSize]);
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    );
-  }
+  // Load artworks when page or filters change
+  useEffect(() => {
+    loadArtworks();
+  }, [loadArtworks]);
+
+  // Handle infinite scroll
+  useEffect(() => {
+    if (inView && !isLoading && !isLoadingMore && hasMore) {
+      setPage((prev) => prev + 1);
+    }
+  }, [inView, isLoading, isLoadingMore, hasMore]);
 
   if (error) {
     return (
@@ -213,29 +239,58 @@ export default function Gallery() {
 
         {/* Artwork Grid */}
         <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
-          {displayedItems.map((item, index) => (
+          {artworks.map((artwork: Artwork, index: number) => (
             <Link
-              key={item._id}
-              href={`/gallery/${item._id}?category=${selectedCategory}&medium=${selectedMedium}&size=${selectedSize}`}
+              key={artwork._id}
+              href={`/gallery/${artwork._id}?category=${selectedCategory}&medium=${selectedMedium}&size=${selectedSize}`}
               className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300 block break-inside-avoid"
             >
               <div className="relative w-full">
-                <Image
-                  src={item.thumbnailUrl}
-                  alt={item.title}
-                  width={800}
-                  height={600}
-                  className="w-full h-auto object-contain"
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                  priority={index < 6}
-                />
+                {artwork.thumbnailUrl && artwork.thumbnailUrl.trim() !== "" ? (
+                  <Image
+                    src={artwork.thumbnailUrl}
+                    alt={artwork.title}
+                    width={800}
+                    height={600}
+                    className="w-full h-auto object-contain"
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                    priority={index < 6}
+                  />
+                ) : (
+                  <div className="w-full aspect-square flex items-center justify-center bg-gray-100">
+                    <span className="text-gray-400">No image available</span>
+                  </div>
+                )}
+              </div>
+              <div className="p-4">
+                <h3 className="font-semibold text-lg mb-1 truncate">
+                  {artwork.title}
+                </h3>
+                <p className="text-sm text-gray-600 mb-1 truncate">
+                  {artwork.category}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  {artwork.medium} • {artwork.size}
+                </p>
               </div>
             </Link>
           ))}
         </div>
 
+        {/* Loading indicators */}
+        {isLoading && (
+          <div className="flex justify-center items-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+          </div>
+        )}
+        {isLoadingMore && (
+          <div className="flex justify-center items-center py-4">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+          </div>
+        )}
+
         {/* Infinite scroll trigger */}
-        {displayedItems.length < filteredItems.length && (
+        {!isLoading && !isLoadingMore && hasMore && (
           <div ref={ref} className="h-10" />
         )}
       </div>

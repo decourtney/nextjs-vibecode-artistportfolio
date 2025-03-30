@@ -22,11 +22,7 @@ async function setAdminRole(email: string) {
       { $set: { role: "admin" } }
     );
 
-    if (result.matchedCount === 0) {
-      console.log("No user found with email:", email);
-    } else {
-      console.log("Successfully set admin role for:", email);
-    }
+    
   } catch (error) {
     console.error("Error:", error);
   } finally {
