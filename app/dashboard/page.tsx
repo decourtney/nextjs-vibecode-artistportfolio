@@ -28,16 +28,6 @@ interface DashboardTag {
   type: "category" | "medium" | "size";
 }
 
-interface FormData {
-  title: string;
-  description: string;
-  category: string;
-  medium: string;
-  size: string;
-  price: string;
-  image: File | null;
-}
-
 interface GalleryResponse {
   artworks: Artwork[];
   total: number;
@@ -55,15 +45,6 @@ export default function Dashboard() {
   const [categories, setCategories] = useState<DashboardTag[]>([]);
   const [mediums, setMediums] = useState<DashboardTag[]>([]);
   const [sizes, setSizes] = useState<DashboardTag[]>([]);
-  const [formData, setFormData] = useState<FormData>({
-    title: "",
-    description: "",
-    category: "",
-    medium: "",
-    size: "",
-    price: "",
-    image: null,
-  });
   const [editingArtwork, setEditingArtwork] = useState<Artwork | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -489,7 +470,7 @@ export default function Dashboard() {
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      setFormData((prev) => ({ ...prev, image: file }));
+                      // File is handled directly in onSubmitForm
                     }
                   }}
                 />

@@ -39,8 +39,6 @@ async function createProfile(email: string) {
       { upsert: true, new: true }
     );
 
-    console.log("Profile created/updated:", profile);
-
     await client.close();
     await mongoose.disconnect();
   } catch (error) {
