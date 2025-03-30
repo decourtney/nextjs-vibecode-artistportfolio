@@ -16,6 +16,7 @@ export function sanitizeFilename(filename: string): string {
 
 export async function createThumbnail(buffer: Buffer): Promise<Buffer> {
   return sharp(buffer)
+    .rotate()
     .resize(400, null, {
       fit: "inside",
       withoutEnlargement: true,
