@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/authOptions";
-import connectDB from "@/lib/mongodb";
-import { getSignedImageUrl, s3Client } from "@/lib/s3";
+import { connectDB } from "../../../lib/db";
+import { s3Client } from "@/lib/s3";
 import { sanitizeFilename, createThumbnail } from "@/lib/utils";
 import { checkAdminRole } from "@/lib/auth";
 
@@ -18,93 +18,56 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "12");
-    const category = searchParams.get("category");
-    const medium = searchParams.get("medium");
-    const size = searchParams.get("size");
+    const offset = (page - 1) * limit;
 
-    // Build query
-    const query: Record<string, unknown> = {};
-    if (category) {
-      const categoryTag = await Tag.findOne({
-        label: category,
-        type: "category",
-      });
-      if (categoryTag) {
-        query.categories = categoryTag._id;
-      }
-    }
-    if (medium) {
-      const mediumTag = await Tag.findOne({ label: medium, type: "medium" });
-      if (mediumTag) {
-        query.medium = mediumTag._id;
-      }
-    }
-    if (size) {
-      const sizeTag = await Tag.findOne({ label: size, type: "size" });
-      if (sizeTag) {
-        query.size = sizeTag._id;
-      }
-    }
-
-    // Get total count for pagination
-    const total = await Artwork.countDocuments(query);
-
-    // Get artworks with pagination
-    const artworks = await Artwork.find(query)
-      .populate("categories medium size")
+    const artworks = await Artwork.find()
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
+      .skip(offset)
       .limit(limit);
 
-    // Transform artworks to include signed URLs
-    const transformedArtworks = await Promise.all(
-      artworks.map(async (artwork) => {
-        // Extract the key from the full URL
-        const getKeyFromUrl = (url: string) => {
-          try {
-            const urlObj = new URL(url);
-            return urlObj.pathname.slice(1); // Remove leading slash
-          } catch {
-            return "";
-          }
-        };
+    const total = await Artwork.countDocuments();
 
-        // Get the S3 keys from the URLs
-        const imageKey = getKeyFromUrl(artwork.src);
-        const thumbnailKey = getKeyFromUrl(artwork.thumbSrc);
+    const hasMore = offset + artworks.length < total;
 
-        // Get signed URLs for images
-        const imageUrl = imageKey ? await getSignedImageUrl(imageKey) : "";
-        const thumbnailUrl = thumbnailKey
-          ? await getSignedImageUrl(thumbnailKey)
-          : "";
+    // Transform artworks to include proper image URLs
+    const transformedArtworks = artworks.map((artwork) => ({
+      _id: artwork._id,
+      title: artwork.name || "",
+      description: artwork.description || "",
+      category: artwork.categories?.[0]?.label || "Uncategorized",
+      medium: artwork.medium?.label || "Unknown",
+      size: artwork.size?.label || "Unknown",
+      dimensions:
+        artwork.metaWidth && artwork.metaHeight
+          ? `${artwork.metaWidth}x${artwork.metaHeight}`
+          : "Unknown",
+      year: new Date().getFullYear(),
+      imageUrl: artwork.src || "",
+      thumbnailUrl: artwork.thumbSrc || "",
+      tags: Array.isArray(artwork.categories)
+        ? artwork.categories.map((cat: { label: string }) => cat.label)
+        : [],
+    }));
 
-        return {
-          _id: artwork._id,
-          title: artwork.name,
-          description: artwork.description,
-          category: artwork.categories[0]?.label || "Uncategorized",
-          medium: artwork.medium?.label || "Unknown",
-          size: artwork.size?.label || "Unknown",
-          dimensions:
-            artwork.metaWidth && artwork.metaHeight
-              ? `${artwork.metaWidth}x${artwork.metaHeight}`
-              : "Unknown",
-          year: new Date().getFullYear(),
-          imageUrl,
-          thumbnailUrl,
-          tags: artwork.categories.map((cat: { label: string }) => cat.label),
-        };
-      })
+    // Filter out artworks with invalid image URLs
+    const validArtworks = transformedArtworks.filter(
+      (artwork) =>
+        artwork.imageUrl &&
+        artwork.imageUrl.trim() !== "" &&
+        artwork.thumbnailUrl &&
+        artwork.thumbnailUrl.trim() !== ""
     );
 
     return NextResponse.json({
-      artworks: transformedArtworks,
+      artworks: validArtworks,
       total,
+      hasMore,
+      returnedCount: validArtworks.length,
+      currentPage: page,
       totalPages: Math.ceil(total / limit),
     });
-  } catch (err) {
-    console.error("Error fetching artworks:", err);
+  } catch (error) {
+    console.error("Error fetching artworks:", error);
     return NextResponse.json(
       { error: "Failed to fetch artworks" },
       { status: 500 }

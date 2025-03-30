@@ -23,18 +23,26 @@ async function createProfile(email: string) {
     const users = db.collection("users");
     const user = await users.findOne({ email });
 
+    // Create or update the profile
     if (!user) {
-      console.log("No user found with email:", email);
-      return;
+      throw new Error("User not found");
     }
 
-    // Create or update the profile
     const profile = await Profile.findOneAndUpdate(
       { authId: user._id.toString() },
       {
         username: email.split("@")[0],
         role: "admin",
-        authId: user._id.toString(),
+        email: email,
+        name: email.split("@")[0],
+        bio: "Admin user",
+        avatar: "",
+        socialLinks: {
+          instagram: "",
+          facebook: "",
+          twitter: "",
+          website: "",
+        },
       },
       { upsert: true, new: true }
     );
