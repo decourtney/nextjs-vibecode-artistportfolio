@@ -3,14 +3,13 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/[...nextauth]/authOptions";
 import connectDB from "@/lib/mongodb";
 import { getSignedImageUrl, s3Client } from "@/lib/s3";
-import { sanitizeFilename } from "@/lib/utils";
 import { checkAdminRole } from "@/lib/auth";
 
 // Import Tag model first to ensure it's registered
 import Tag from "@/models/Tag";
 // Then import Artwork model which depends on Tag
 import Artwork from "@/models/Artwork";
-import { DeleteObjectCommand, CopyObjectCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export async function GET(
   request: Request,
